@@ -12,7 +12,9 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 
 export default function AppPage() {
   const [selectedElement, setSelectedElement] = useState<SelectedElement | null>(null);
+  const [selectedElements, setSelectedElements] = useState<SelectedElement[]>([]);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [clipboard, setClipboard] = useState<string[]>([]);
   const stageContentRef = useRef('');
   const { state: htmlContent, set: setHtmlContent, undo, redo, canUndo, canRedo, reset } = useHistory('');
 
@@ -23,6 +25,7 @@ export default function AppPage() {
   const handleImport = (html: string) => {
     reset(html);
     setSelectedElement(null);
+    setSelectedElements([]);
   };
 
   const handleContentChange = (html: string) => {
@@ -44,17 +47,19 @@ export default function AppPage() {
   };
 
   const handleDelete = () => {
-    if (selectedElement) {
+    if (selectedElements.length > 0) {
       setShowDeleteDialog(true);
     }
   };
 
   const confirmDelete = () => {
-    if (selectedElement) {
-      selectedElement.element.remove();
+    if (selectedElements.length > 0) {
+      selectedElements.forEach(el => el.element.remove());
       setSelectedElement(null);
+      setSelectedElements([]);
       setShowDeleteDialog(false);
-      handleContentChange(stageContentRef.current);
+      const updatedContent = stageContentRef.current;
+      setHtmlContent(updatedContent);
     }
   };
 
@@ -62,6 +67,68 @@ export default function AppPage() {
     const fullHTML = exportToHTML(stageContentRef.current);
     downloadHTML(fullHTML, 'edited-poster.html');
   };
+
+  const handleCopy = () => {
+    if (selectedElements.length > 0) {
+      const copiedHTML = selectedElements.map(el => el.element.outerHTML);
+      setClipboard(copiedHTML);
+    }
+  };
+
+  const handlePaste = () => {
+    if (clipboard.length > 0) {
+      const parser = new DOMParser();
+      const pastedHTML = clipboard.map(html => {
+        const doc = parser.parseFromString(html, 'text/html');
+        const element = doc.body.firstChild as HTMLElement;
+        if (element) {
+          element.id = generateUniqueId();
+          const currentLeft = parseInt(element.style.left) || 0;
+          const currentTop = parseInt(element.style.top) || 0;
+          element.style.left = `${currentLeft + 20}px`;
+          element.style.top = `${currentTop + 20}px`;
+          return element.outerHTML;
+        }
+        return '';
+      }).join('');
+      const updatedContent = stageContentRef.current + pastedHTML;
+      setHtmlContent(updatedContent);
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isCtrlOrCmd = e.ctrlKey || e.metaKey;
+
+      if ((e.target as HTMLElement).isContentEditable) {
+        return;
+      }
+
+      if (isCtrlOrCmd && e.key === 'c') {
+        e.preventDefault();
+        handleCopy();
+      } else if (isCtrlOrCmd && e.key === 'v') {
+        e.preventDefault();
+        handlePaste();
+      } else if ((e.key === 'Delete' || e.key === 'Backspace') && selectedElements.length > 0) {
+        e.preventDefault();
+        setShowDeleteDialog(true);
+      } else if (isCtrlOrCmd && e.key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          if (canRedo) redo();
+        } else {
+          if (canUndo) undo();
+        }
+      } else if (isCtrlOrCmd && e.key === 'y') {
+        e.preventDefault();
+        if (canRedo) redo();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [selectedElements, clipboard, canUndo, canRedo, undo, redo]);
 
   return (
     <div className="h-screen flex bg-slate-50">
@@ -83,7 +150,9 @@ export default function AppPage() {
           htmlContent={htmlContent}
           onSelect={setSelectedElement}
           selectedElement={selectedElement}
+          selectedElements={selectedElements}
           onContentChange={handleContentChange}
+          onMultiSelect={setSelectedElements}
         />
 
         <PropertiesPanel
@@ -97,7 +166,7 @@ export default function AppPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete Element</AlertDialogTitle>
             <AlertDialogDescription>
-              Are you sure you want to delete this element? This action cannot be undone.
+              Are you sure you want to delete {selectedElements.length} element{selectedElements.length > 1 ? 's' : ''}? This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

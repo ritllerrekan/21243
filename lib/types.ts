@@ -24,3 +24,8 @@ export interface SelectedElement {
   isImage: boolean;
   isText: boolean;
 }
+
+export interface ClipboardData {
+  html: string;
+  styles: string;
+}

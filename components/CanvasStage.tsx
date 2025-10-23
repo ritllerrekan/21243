@@ -9,10 +9,12 @@ interface CanvasStageProps {
   htmlContent: string;
   onSelect: (element: SelectedElement | null) => void;
   selectedElement: SelectedElement | null;
+  selectedElements: SelectedElement[];
   onContentChange: (html: string) => void;
+  onMultiSelect: (elements: SelectedElement[]) => void;
 }
 
-export function CanvasStage({ htmlContent, onSelect, selectedElement, onContentChange }: CanvasStageProps) {
+export function CanvasStage({ htmlContent, onSelect, selectedElement, selectedElements, onContentChange, onMultiSelect }: CanvasStageProps) {
   const stageRef = useRef<HTMLDivElement>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
@@ -48,7 +50,10 @@ export function CanvasStage({ htmlContent, onSelect, selectedElement, onContentC
     const target = e.target as HTMLElement;
 
     if (target === stageRef.current) {
-      onSelect(null);
+      if (!e.ctrlKey && !e.metaKey) {
+        onSelect(null);
+        onMultiSelect([]);
+      }
       return;
     }
 
@@ -67,7 +72,27 @@ export function CanvasStage({ htmlContent, onSelect, selectedElement, onContentC
         isImage: isImageElement(clickedElement),
         isText: isTextElement(clickedElement),
       };
-      onSelect(selection);
+
+      if (e.ctrlKey || e.metaKey) {
+        const isAlreadySelected = selectedElements.some(el => el.id === selection.id);
+        if (isAlreadySelected) {
+          const newSelection = selectedElements.filter(el => el.id !== selection.id);
+          onMultiSelect(newSelection);
+          if (newSelection.length === 1) {
+            onSelect(newSelection[0]);
+          } else if (newSelection.length === 0) {
+            onSelect(null);
+          }
+        } else {
+          const newSelection = [...selectedElements, selection];
+          onMultiSelect(newSelection);
+          onSelect(selection);
+        }
+        return;
+      } else {
+        onSelect(selection);
+        onMultiSelect([selection]);
+      }
 
       setIsDragging(true);
       setDragStart({ x: e.clientX, y: e.clientY });
@@ -84,20 +109,32 @@ export function CanvasStage({ htmlContent, onSelect, selectedElement, onContentC
         clickedElement.style.top = `${currentTop}px`;
       }
     }
-  }, [onSelect]);
+  }, [onSelect, onMultiSelect, selectedElements]);
 
   const handleMouseMove = useCallback((e: MouseEvent) => {
-    if (!isDragging || !selectedElement) return;
+    if (!isDragging) return;
 
     const deltaX = e.clientX - dragStart.x;
     const deltaY = e.clientY - dragStart.y;
 
-    const newLeft = elementStart.x + deltaX;
-    const newTop = elementStart.y + deltaY;
+    if (selectedElements.length > 1) {
+      selectedElements.forEach((el) => {
+        const computedStyle = window.getComputedStyle(el.element);
+        const currentLeft = parseInt(computedStyle.left) || 0;
+        const currentTop = parseInt(computedStyle.top) || 0;
 
-    selectedElement.element.style.left = `${newLeft}px`;
-    selectedElement.element.style.top = `${newTop}px`;
-  }, [isDragging, selectedElement, dragStart, elementStart]);
+        el.element.style.left = `${currentLeft + deltaX}px`;
+        el.element.style.top = `${currentTop + deltaY}px`;
+      });
+      setDragStart({ x: e.clientX, y: e.clientY });
+    } else if (selectedElement) {
+      const newLeft = elementStart.x + deltaX;
+      const newTop = elementStart.y + deltaY;
+
+      selectedElement.element.style.left = `${newLeft}px`;
+      selectedElement.element.style.top = `${newTop}px`;
+    }
+  }, [isDragging, selectedElement, selectedElements, dragStart, elementStart]);
 
   const handleMouseUp = useCallback(() => {
     if (isDragging && stageRef.current) {
@@ -117,20 +154,6 @@ export function CanvasStage({ htmlContent, onSelect, selectedElement, onContentC
     }
   }, [isDragging, handleMouseMove, handleMouseUp]);
 
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Delete' && selectedElement) {
-        selectedElement.element.remove();
-        onSelect(null);
-        if (stageRef.current) {
-          onContentChange(stageRef.current.innerHTML);
-        }
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [selectedElement, onSelect, onContentChange]);
 
   const handleResize = useCallback((width: number, height: number) => {
     if (!selectedElement || !selectedElement.isImage) return;
@@ -174,7 +197,7 @@ export function CanvasStage({ htmlContent, onSelect, selectedElement, onContentC
             )}
           </div>
 
-          {selectedElement && elementRect && selectedElement.isImage && stageRef.current && (
+          {selectedElement && elementRect && selectedElement.isImage && stageRef.current && selectedElements.length === 1 && (
             <ResizeHandles
               element={selectedElement.element}
               stageRef={stageRef.current}
@@ -184,13 +207,15 @@ export function CanvasStage({ htmlContent, onSelect, selectedElement, onContentC
           )}
         </div>
 
-        {selectedElement && (
+        {selectedElements.length > 0 && (
           <style jsx global>{`
-            #${selectedElement.id} {
-              outline: 2px solid #3b82f6 !important;
-              outline-offset: 2px;
-              box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1) !important;
-            }
+            ${selectedElements.map(el => `
+              #${el.id} {
+                outline: 2px solid #3b82f6 !important;
+                outline-offset: 2px;
+                box-shadow: 0 0 0 4px rgba(59, 130, 246, 0.1) !important;
+              }
+            `).join('')}
           `}</style>
         )}
       </div>
